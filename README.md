@@ -9,7 +9,7 @@ the usual tricks.
 </p>
 
 Every implementation solves an identical problem with identical arithmetic, and
-`make validate` proves it: all sixteen agree to fifteen digits. The interesting result
+`make validate` proves it: every one of them agrees to fifteen digits. The interesting result
 is not that the compiled languages are fast — it is *which* of them are, by how little,
 and what the beautiful versions cost.
 
@@ -60,7 +60,7 @@ julia/pendulum_inline.jl     + StaticArrays, @view and @inline  <- fastest overa
 julia/pendulum_svector.jl    the same without @inline, to show what it costs
 julia/pendulum_views.jl      preallocated buffers and broadcast; fast but ugly
 julia/pendulum_cstyle.jl     Julia written as if it were C
-julia/pendulum_tuple.jl      tuples plus broadcast: a cautionary tale
+julia/pendulum_tuple.jl      tuples plus broadcast; slow, but far less so on Julia 1.13
 matlab/pendulum.m            straightforward MATLAB
 python/pendulum.py           straightforward NumPy
 python/pendulum_tuple.py     a 4-tuple value type, no NumPy in the hot loop
@@ -125,29 +125,36 @@ run may land on an efficiency core and read 40% slow.
 
 **1. Vanilla Julia, MATLAB and Python are beautiful and expressive** — exactly the code
 people want to write. And they are slow, because every one of the 300 000 right-hand-side
-evaluations allocates. The ranking is Julia 52 ms, MATLAB 104 ms, Python 1456 ms: Julia is
-2× better than MATLAB, MATLAB is 14× better than Python, and Python is **193× off the best
-implementation here**. Python is in a class of its own, and MATLAB is closer to vanilla
-Julia than its reputation suggests.
+evaluations allocates. The ranking is Julia 37 ms, MATLAB 112 ms, Python 1266 ms: Julia is
+3× better than MATLAB, MATLAB is 11× better than Python, and Python is **187× off the best
+implementation here**. Python is in a class of its own. Julia 1.13 moved this row
+noticeably — the same file took 52 ms on 1.12 — so the vanilla-Julia penalty is shrinking
+with the runtime, while MATLAB and Python are where they have always been.
 
 **2. Julia can be brought *past* C speed without giving up the look of the code.** Views,
 `StaticArrays` and `@inline` are enough; `julia/pendulum_inline.jl` differs from the
 beautiful `julia/pendulum.jl` by four marks — `using StaticArrays`, `@view` on the column
 read, `SVector` in the return, and `@inline` on `fpend` — and it is the **fastest
-implementation here**, 3% ahead of the best C++, 5% ahead of C, 7% ahead of the original
-Fortran, and 20% ahead of the ugly hand-buffered Julia. A 7× speedup over the vanilla
-version for four annotations, with the integrator loop character-for-character unchanged.
+implementation here**, 2% ahead of the best C++, 12% ahead of C, 11% ahead of the classic
+Fortran, and 13% ahead of the ugly hand-buffered Julia. The 2% is the honest margin: the
+committed C++ has been given the one inlining hint clang does not take by itself, without
+which it is 6% behind. A 5.4× speedup over the vanilla version for four annotations, with
+the integrator loop character-for-character unchanged.
 MATLAB and Python have no equivalent. This is the strongest result in the set.
 
 **3. Python can be rescued from outside the language, at a cost.** numba is remarkably
 clean — `diff python/pendulum.py python/pendulum_numba.py` is six lines, mostly `@njit` —
-and gets to 2.2× of the best. JAX reaches 3.7×, but only after the entire time loop is
-rewritten as a functional `fori_loop` with no mutation. Both close a 193× gap to within a
-small factor, which is the real point; neither is as clean or as fast as Julia's native
-tools, and both are a separate compiler you have to keep happy.
+and gets to 1.8× of the best, its strongest showing yet. JAX reaches 3.8×, but only after
+the entire time loop is rewritten as a functional `fori_loop` with no mutation. Both close a
+186× gap to within a small factor, which is the real point; neither is as clean or as fast as
+Julia's native tools, and both are a separate compiler you have to keep happy — numba
+0.64 will not even import against NumPy 2.5, and measuring this row needed an upgrade to
+numba 0.67.
 
-**4. C is fast and ugly.** Explicit index loops everywhere, macros for 2-D indexing. It
-buys nothing over the alternatives any more.
+**4. C is ugly and no longer even fast.** Explicit index loops everywhere, macros for 2-D
+indexing — and on this machine it is the **slowest of the compiled implementations**, 12%
+behind Julia and 5% behind C++, beaten by both Fortrans and by Julia written in C's own
+style. It buys nothing over the alternatives any more.
 
 **5. Fortran gets real benefit from native multidimensional arrays and array arithmetic** —
 whole-array expressions with no library, no template machinery, and column slices as
@@ -156,8 +163,8 @@ Fortran (module with explicit interfaces, `associate`, an `abstract interface` f
 right-hand side, `pure` throughout) removes almost all of the verbosity of the old style
 at no cost in speed. The one concession to performance is that the right-hand side writes
 into an out-argument instead of returning an array — `call f(yn + h*k1/5, k2)` rather than
-`k2 = f(yn + h*k1/5)` — which is worth 6–8%. Slightly worse syntax, and it puts modern
-Fortran within 1% of the best C++ and ahead of C, with no library, no templates and no
+`k2 = f(yn + h*k1/5)` — which is worth 11%. Slightly worse syntax, and it puts modern
+Fortran within 3% of the best C++ and 2% ahead of C, with no library, no templates and no
 hand-written vector class.
 
 **6. Modern C++ recovers both beauty and speed, but has to build its own vocabulary
@@ -168,12 +175,12 @@ version and runs slightly *faster* than C — second only to Julia. Eigen would 
 Every other language here has this out of the box; it is C++'s one real handicap, and it
 is worth being blunt about.
 
-**7. The headline result nobody expects: this benchmark is ~two thirds a `libm`
-benchmark.** With the arithmetic equalized across languages, Julia, C, C++ and Fortran
-land within 6% of each other — because they all spend ~5.2 ms of their ~7.8 ms inside the
-same `glibc` `sin`/`cos`. They converge because the language is not what is being
-measured. That reframes the whole exercise, and it is the most interesting thing to say
-about it.
+**7. The headline result nobody expects: this benchmark is ~three fifths a `libm`
+benchmark.** With the arithmetic equalized across languages, Julia, C, C++ and Fortran land
+within 12% of each other — because they all spend ~4.4 ms of their ~7 ms inside the same
+`glibc` `sin`/`cos`. They converge because the language is largely not what is being
+measured; the visible spread is the ~2.8 ms that is left. That reframes the whole exercise,
+and it is the most interesting thing to say about it.
 
 ## Timings
 
@@ -183,37 +190,37 @@ load, against a 4.5 GHz max turbo, on AC power). Interleaving and a fixed clock 
 under `powersave` the absolute times drift ~30% between rounds and the ordering of the
 leading group shuffles. Distributions here are tight — ±0.3 ms — so the ranking is real,
 and `pendulum_inline.jl`'s *slowest* round still beats every other implementation's
-median. The one exception is `c/pendulum.c` against `fortran/pendulum.f90`: those two are
-within 1% and swap places between runs. The ordering is not machine-state specific —
-repeating it with every editor and browser closed moved everything down a uniform ~5.5%
-and changed nothing else.
+median, and every distribution below is tight to ±0.03 ms — a quiet desktop with a fixed
+clock is a far better measuring instrument than a laptop.
 
 | Implementation | ms | vs fastest | Notes |
 |---|---|---|---|
-| **`julia/pendulum_inline.jl`** | **7.5** | **1.00×** | **beautiful *and* fastest — SVector + `@view` + `@inline`** |
-| `cpp/pendulum.cpp` | 7.7 | 1.03× | `std::vector<State>`, no mdspan needed |
-| `cpp/pendulum_colref.cpp` | 7.8 | 1.03× | mdspan + `static_vector_ref` column references |
-| `cpp/pendulum_mdspan.cpp` | 7.8 | 1.03× | mdspan + `static_vector` |
-| `fortran/pendulum_modern.f90` | 7.8 | 1.04× | modern Fortran, `pure subroutine` right-hand side |
-| `c/pendulum.c` | 7.9 | 1.05× | |
-| `fortran/pendulum.f90` | 8.0 | 1.06× | the classic style |
-| `julia/pendulum_cstyle.jl` | 8.7 | 1.15× | Julia written as C |
-| `julia/pendulum_views.jl` | 9.1 | 1.20× | fast-but-ugly Julia: preallocated buffers, `@.` everywhere |
-| `julia/pendulum_svector.jl` | 10.7 | 1.42× | `pendulum_inline.jl` without `@inline` |
-| `python/pendulum_numba.py` | 16.5 | 2.2× | `pendulum.py` + `@njit`, six-line diff |
-| `python/pendulum_jax.py` | 27.8 | 3.7× | jit + `fori_loop`, held to one thread like the others |
-| `julia/pendulum.jl` | 52.0 | 6.9× | the beautiful Julia baseline: allocates per call |
-| `matlab/pendulum.m` | 103.8 | 13.8× | the beautiful MATLAB baseline |
-| `python/pendulum_tuple.py` | 752 | 100× | plain Python 4-tuples, no NumPy in the hot loop |
-| `python/pendulum.py` | 1456 | 193× | the beautiful Python baseline |
-| `julia/pendulum_tuple.jl` | 1584 | 210× | cautionary tale: tuples + broadcast defeats Julia |
-| JAX without `jit` | ~217 000 | ~29 000× | 4.3 ms *per step*; ~150× slower than plain NumPy |
+| **`julia/pendulum_inline.jl`** | **6.79** | **1.00×** | **beautiful *and* fastest — SVector + `@view` + `@inline`** |
+| `cpp/pendulum.cpp` | 6.95 | 1.02× | `std::vector<State>`, no mdspan needed; passes a lambda so clang inlines |
+| `cpp/pendulum_colref.cpp` | 7.19 | 1.06× | mdspan + `static_vector_ref` column references |
+| `cpp/pendulum_mdspan.cpp` | 7.19 | 1.06× | mdspan + `static_vector` |
+| `fortran/pendulum_modern.f90` | 7.39 | 1.09× | modern Fortran, `pure subroutine` right-hand side |
+| `fortran/pendulum.f90` | 7.51 | 1.11× | the classic style |
+| `julia/pendulum_cstyle.jl` | 7.52 | 1.11× | Julia written as C |
+| `c/pendulum.c` | 7.57 | 1.12× | |
+| `julia/pendulum_views.jl` | 7.68 | 1.13× | fast-but-ugly Julia: preallocated buffers, `@.` everywhere |
+| `julia/pendulum_svector.jl` | 9.24 | 1.36× | `pendulum_inline.jl` without `@inline` |
+| `python/pendulum_numba.py` | 12.3 | 1.81× | `pendulum.py` + `@njit`, a six-line diff |
+| `python/pendulum_jax.py` | 25.8 | 3.80× | jit + `fori_loop`, held to one thread like the others |
+| `julia/pendulum.jl` | 36.7 | 5.4× | the beautiful Julia baseline: allocates per call |
+| `julia/pendulum_tuple.jl` | 64.5 | 9.5× | tuples plus broadcast; 24× faster on Julia 1.13 than on 1.12 |
+| `matlab/pendulum.m` | 112 | 16.6× | the beautiful MATLAB baseline; this is an old MATLAB (R2018b), but R2026a measured 13.8× elsewhere, so the row is about right |
+| `python/pendulum_tuple.py` | 575 | 85× | plain Python 4-tuples, no NumPy in the hot loop |
+| `python/pendulum.py` | 1266 | 186× | the beautiful Python baseline |
+| JAX without `jit` | ~200 000 | ~30 000× | ~4 ms *per step*; ~150× slower than plain NumPy |
 
-Two orderings are worth pausing on. **Julia is first, ahead of C, C++ and Fortran** — not
-merely level with them. And **the beautiful Julia beats the ugly Julia by 20%**
-(`pendulum_inline.jl` 7.5 ms against `pendulum_views.jl` 9.1 ms), which reverses the usual
-assumption that the buffer-juggling version must be faster. Under `powersave` the two
-looked tied, which is exactly why the clock had to be fixed before drawing conclusions.
+Three orderings are worth pausing on. **Julia is first, ahead of C, C++ and Fortran** — by
+2% over the best C++, which is the margin after handing clang the one inlining hint it does
+not take by default (without it, 6%). **The beautiful Julia beats the ugly Julia by 13%**
+(`pendulum_inline.jl` 6.79 ms against `pendulum_views.jl` 7.68 ms), which reverses the usual
+assumption that the buffer-juggling version must be faster. And **C is last of the compiled
+implementations**, behind both Fortrans and all three C++ variants — and behind
+`pendulum_cstyle.jl`, which is Julia written in C's own style.
 
 ## Where the time actually goes
 
@@ -222,20 +229,30 @@ only the `libm` calls on them:
 
 | | libm time | total | libm share |
 |---|---|---|---|
-| original formulation (6 trig per RHS → 4 `libm` calls) | 9.3 ms | ~11.9 ms | ~78% |
-| trig identities (4 trig per RHS → 2 `sincos` calls) | 5.2 ms | 7.8 ms | ~67% |
+| original formulation (6 trig per RHS → 4 `libm` calls) | 9.4 ms | ~12.2 ms | ~77% |
+| trig identities (4 trig per RHS → 2 `sincos` calls) | 4.4 ms | 7.2 ms | ~61% |
 
-Reducing the library work made everything ~1.5× faster; two thirds of what is left is
+Reducing the library work made everything ~1.7× faster; three fifths of what is left is
 still inside `glibc`. The arithmetic, the loop and all the memory traffic together are
-~2.6 ms of the 7.8.
+~2.8 ms of the 7.2. (The libm figures include streaming the recorded arguments back from
+memory, which the real code does not, so they are slight over-estimates.)
 
 **No AVX is involved.** Default `-O3` targets baseline x86-64, i.e. SSE2: 128-bit packed
 doubles (two at a time), no FMA, no `ymm`. The 4-element state arithmetic *is* vectorized,
 just two-wide. And `-march=native`, which really does emit AVX2 + FMA, makes everything
-**slower**: C 7.2 → 11.1 ms, C++ 7.3 → 11.7 ms, Fortran 7.4 → 10.9 ms. Wider vectors buy
-nothing on 4-element states, and keeping `ymm` state dirty across 1.2 M `libm` calls costs
-more than the arithmetic saves. So the codes are essentially optimal, and there is no
-compiler-flag magic left.
+**slower**: C 7.57 → 10.61 ms, C++ 7.17 → 10.78 ms, Fortran 7.39 → 10.19 ms. Wider vectors
+buy nothing on 4-element states, and keeping wide vector state dirty across 1.2 M `libm`
+calls costs more than the arithmetic saves. That held on both machines this was measured on,
+including this one with AVX-512 available. So the codes are essentially optimal, and there
+is no compiler-flag magic left.
+
+**And Julia is not quietly cheating.** Julia JIT-compiles for the machine it is running on,
+so unlike the `-O3` binaries it *can* use AVX and AVX-512 — its generated code contains 35
+`ymm` and 4 `zmm` instructions where the compiled binaries contain none, though no FMA
+anywhere, which is why the arithmetic stays bit-identical. That turns out not to be where
+its lead comes from: forcing baseline codegen with `julia --cpu-target=generic` makes it
+*slightly faster* (6.56 ms), not slower. The compiled languages are not being shortchanged
+by their flags.
 
 ## Findings worth mentioning
 
@@ -244,30 +261,41 @@ trigonometric identities give every value the equations need —
 $\sin(\theta_1-\theta_2) = s_1c_2 - c_1s_2$, $\cos(\theta_1-\theta_2) = c_1c_2 + s_1s_2$,
 $\sin(\theta_1-2\theta_2) = s_\Delta c_2 - c_\Delta s_2$, and
 $3-\cos(2\theta_1-2\theta_2) = 2 + 2s_\Delta^2$ — halving the library calls for a uniform
-**1.5–1.6× in every language**. Exact algebra, no `-ffast-math`, no threads. Applied
+**~1.7× in every language**. Exact algebra, no `-ffast-math`, no threads. Applied
 everywhere in these files.
 
 **Two fairness bugs were hiding in the original numbers.** The Fortran was factoring `h`
 into the stage arguments (`yn + h*9*k1/4`), which lets the compiler hoist `h*9/4` out of
 the loop, while C, C++ and Julia scaled `k` by `h` immediately. That was worth 6–7% and
-was the entire reason Fortran once looked like the winner; the same trick applied to C++
-dropped it from 18.0 to 16.7 ms. All files now use one convention. Separately, the Fortran
+was the entire reason Fortran once looked like the winner; the same trick was worth about
+as much in C++. All files now use one convention. Separately, the Fortran
 had `real(dp), parameter :: h = 0.2`, which takes the **single-precision** literal and
 integrates with h = 0.200000002980232 — a different problem from every other file. Both
 files now write `0.2_dp`. It is a classic Fortran gotcha and a good argument for
 `make validate`.
 
 **Is Julia's win an artifact of `@inline`? No — inlining is available to all of them, and
-three of the four gain nothing from it.** None of the compiled versions inline `fpend` by
+only one of the five gains from it.** None of the compiled versions inline `fpend` by
 default: C makes six direct calls, C++ six indirect ones (the right-hand side arrives as a
 function reference through the template parameter), and Fortran six indirect ones through
-`procedure(rhs) :: f`. Given the same treatment: passing a lambda instead of a function
-reference makes clang inline it, for no measurable change (7.32 → 7.32 ms); `-flto` makes
-gfortran inline it, for no change (7.30 → 7.37); and gcc *refuses* to inline it even when
-`fpend` is `static` and the inline budget is raised to 3000 instructions — forcing it with
-`always_inline` makes C **8% slower** (7.39 → 7.99), so gcc's heuristic was right.
+`procedure(rhs) :: f`. Given the same treatment, the results split:
 
-The reason `@inline` is worth 1.5× in Julia and ~0% elsewhere is that Julia was paying a
+| | as written | inlined | |
+|---|---|---|---|
+| `cpp/pendulum.cpp` | 7.19 | **6.95** | lambda instead of a function reference; **kept** |
+| `cpp/pendulum_mdspan.cpp` | 7.19 | 7.32 | same change, 2% *slower*; reverted |
+| `cpp/pendulum_colref.cpp` | 7.19 | 7.47 | same change, 4% *slower*; reverted |
+| `c/pendulum.c` | 7.57 | 7.88 | `always_inline`, 4% *slower*; not used |
+| `fortran/pendulum_modern.f90` | 7.41 | 7.40 | `-flto`, no change; not used |
+
+gcc, incidentally, *refuses* to inline `fpend` even when it is `static` and the inline budget
+is raised to 3000 instructions, and the measurement says it is right to. Three ways of
+getting clang to inline it — a lambda at the call site, defining `fpend` as a `constexpr`
+lambda, or a function pointer as a template parameter — all land within noise of each other
+(6.97–7.00 ms), so `cpp/pendulum.cpp` uses the one that leaves `fpend` and `runge5`
+untouched. Even at its best, C++ is 2% behind Julia.
+
+The reason `@inline` is worth 1.4× in Julia and at most 3% elsewhere is that Julia was paying a
 penalty the others never pay: un-inlined, `fpend` returns its `SVector` by value through
 the ABI — a memory round-trip six times per step — and that also blocks the `@view` from
 being optimized away. C, C++ and Fortran hand the result back through a pointer or
@@ -275,23 +303,37 @@ out-argument by convention, so their calls were already nearly free. `@inline` d
 give Julia a favour; it brings Julia up to the calling convention the others get for
 nothing.
 
-**Fortran's array-valued function results cost 8% here.** Writing the stages as
+**Julia 1.13 moved two rows a long way, which is a reason to date these tables.** Going from
+Julia 1.12 to 1.13, with the files untouched: `pendulum_tuple.jl` went from 1584 ms to
+64.5 ms, a **24× improvement**, and `pendulum.jl` from 52 ms to 37 ms. The allocation counts
+only halved (7.6 M to 3.6 M for the tuple version), so this is not simply less garbage — 208
+ns per allocation on 1.12 against 18 ns on 1.13 says the old figure was a pathology in the
+tuple-broadcast path rather than an inherent cost. The tuple version is still 9.5× off the
+best and still the wrong way to write this, but "tuples defeat Julia" was too strong a
+lesson to draw from one release.
+
+**Fortran's array-valued function results cost 11% here.** Writing the stages as
 `k2 = f(yn + h*k1/5)` — a `pure function` returning `real(dp) :: f(neq)` — reads
-beautifully and measures 7.8–8.0 ms, because gfortran does not elide the copy of the
-result. The same file with a `pure subroutine` and an out-argument is 7.3–7.4 ms, so
+beautifully and measures 8.28 ms, because gfortran does not elide the copy of the
+result. The same file with a `pure subroutine` and an out-argument is 7.38 ms — 11% — so
 `pendulum_modern.f90` uses that form; everything else about the modernization is
 unaffected. Calling `fpend` directly instead of through the procedure argument recovers
 almost nothing, so it is the result copy, not the indirect call.
 
-**The obvious Fortran modernization is a 40% regression.** Declaring the trajectory as
+**A Fortran finding that did *not* survive re-measurement.** An earlier version of this
+README claimed that declaring the trajectory as
 `real(dp), intent(out), contiguous :: y(:,:)` and taking `nsteps` from `size(y,2)` costs
-40%, because assumed shape hides the leading extent and the compiler stops knowing the
-columns are length 4. `contiguous` does not help — it is the extent, not the stride. Hence
-`nsteps` stays an explicit argument.
+40%. On this machine it costs nothing at all — 7.32 ms against 7.38 — and the generated
+code is equivalent (133 vs 136 packed instructions in `runge5`). The 40% was real but
+mis-attributed: it only appears in combination with the array-valued *function* form, where
+it is worth 18% here (9.77 ms against 8.28), and that is the form the file used when the
+measurement was taken. With the `pure subroutine` the assumed-shape interface is free, so
+`nsteps` could be dropped for a cleaner signature; it stays for now only because that has
+been measured on one machine and one compiler.
 
 **NumPy is the problem, not the solution, at four elements.** `python/pendulum_tuple.py`
 drops NumPy out of the inner loop in favour of a 4-tuple subclass with element-wise
-operators, and is 1.9× faster than the NumPy version while looking better. Each NumPy
+operators, and is 2.2× faster than the NumPy version while looking better. Each NumPy
 binary op costs ~0.5 µs of dispatch regardless of size. Related: transposing the result
 array so states are contiguous changes `pendulum.py` by 0.4% — the layout was never the
 problem. In numba, where the dispatch overhead is gone, the same change is worth 5%.
@@ -359,14 +401,22 @@ method all along, at the same speed. Both fixed.
 
 ## Environment
 
-The numbers above: Intel Core Ultra 5 125H (AVX2 + FMA, no AVX-512), Linux, on AC power
-with `cpupower frequency-set -g performance` (turbo enabled; core 0 sustains 4.34–4.45 GHz
-of a 4.5 GHz maximum) and pinned with `taskset -c 0`. gcc 15.2.0, clang 21.1.8 with libc++,
-gfortran 15.2.0, Julia 1.12.6, Python 3.14.4 (NumPy 2.3.5, numba 0.64.0), JAX 0.11.1,
-MATLAB R2026a Update 4.
+The numbers above: AMD Ryzen 9 7900X (12 cores, AVX-512 and FMA available), Linux, an idle
+desktop with `cpupower frequency-set -g performance` and every run pinned with
+`taskset -c 0`. gcc 15.2.0, clang 21.1.8 with libc++, gfortran 15.2.0, Julia 1.13.0,
+Python 3.14.4 (NumPy 2.5.2, numba 0.67.0), JAX 0.11.1, MATLAB R2018b. Medians of 6 interleaved rounds, each
+round taking the best of the last 5 of the 10 timings a program prints.
 
-Set the governor before quoting any of these numbers. On `powersave` everything above 8 ms
-still ranks correctly, but the leading group becomes a coin toss.
+Pinning matters more than the governor: on a fixed-clock desktop the governor changed little,
+but an unpinned run wanders between cores and reads several percent slow. On the laptop this
+was originally developed on, `powersave` moved absolute times by ~30% and reshuffled the
+leading group entirely.
+
+A handful of secondary figures were measured on that laptop and have not been re-measured
+here: the JAX internals (the O(N²) `h`-as-a-literal trap, the transpose cost, the un-jitted
+per-step time), the automatic-differentiation costs, the `vmap` batching numbers, and the
+NumPy/numba array-layout experiments. They are quoted as ratios, which is what they are
+about; the absolute milliseconds would shift by roughly the same factor as everything else.
 
 ## Contributing
 
@@ -387,7 +437,7 @@ deserves credit for a good deal of what is here now:
 
 - **Performance work.** The `sincos`-plus-identities rewrite of the right-hand side
   (~1.5× everywhere), equalizing where `h` multiplies across all implementations, and
-  tracking down why `@inline` was worth 1.5× in Julia.
+  tracking down why `@inline` was worth 1.4× in Julia.
 - **New variants.** `cpp/static_vector.hpp` and its companion, the `std::vector<State>` and
   column-reference C++ versions, the modern Fortran rewrite, `julia/pendulum_inline.jl`, and
   `python/pendulum_tuple.py`. The numba and JAX files were AI-written from the start and were
