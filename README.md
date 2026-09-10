@@ -20,14 +20,11 @@ unit gravity. The configuration is given by the two angles $\theta_1,\theta_2$ m
 from straight down, and the equations of motion are
 
 $$
-\theta_1'' = \frac{-3\sin\theta_1 - \sin(\theta_1-2\theta_2)
-- 2\sin(\theta_1-\theta_2)\left(\theta_2'^2 + \theta_1'^2\cos(\theta_1-\theta_2)\right)}
-{3-\cos(2\theta_1-2\theta_2)},
+\theta_1'' = \frac{-3\sin\theta_1 - \sin(\theta_1-2\theta_2) - 2\sin(\theta_1-\theta_2)\left(\theta_2'^2 + \theta_1'^2\cos(\theta_1-\theta_2)\right)}{3-\cos(2\theta_1-2\theta_2)},
 $$
 
 $$
-\theta_2'' = \frac{2\sin(\theta_1-\theta_2)\left(2\theta_1'^2 + 2\cos\theta_1
-+ \theta_2'^2\cos(\theta_1-\theta_2)\right)}{3-\cos(2\theta_1-2\theta_2)}.
+\theta_2'' = \frac{2\sin(\theta_1-\theta_2)\left(2\theta_1'^2 + 2\cos\theta_1 + \theta_2'^2\cos(\theta_1-\theta_2)\right)}{3-\cos(2\theta_1-2\theta_2)}.
 $$
 
 Introducing the angular velocities $\omega_1=\theta_1'$, $\omega_2=\theta_2'$ turns this
