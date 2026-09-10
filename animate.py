@@ -7,7 +7,7 @@ the picture shows exactly the problem being timed.  The drawing follows the
 `pendplot.m` utility from Math 128A: a base bar, two rigid links, and a mass at
 each joint, on equal axes.
 
-    python3 animate.py [--time 20] [--step 0.02] [--stride 3] [--out pendulum.gif]
+    python3 animate.py [--time 50] [--step 0.02] [--stride 3] [--out pendulum.gif]
 """
 
 import argparse
@@ -75,7 +75,7 @@ def animate(y, h, stride, out, dpi=100):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--time", type=float, default=20.0, help="final time (default 20)")
+    parser.add_argument("--time", type=float, default=50.0, help="final time (default 50)")
     parser.add_argument("--step", type=float, default=0.02, help="step size (default 0.02)")
     parser.add_argument("--stride", type=int, default=3, help="keep every Nth step (default 3)")
     parser.add_argument("--out", default="pendulum.gif", help="output file")
