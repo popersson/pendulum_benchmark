@@ -74,7 +74,10 @@ int main()
     for (int iter = 0; iter < 10; ++iter) {
         const auto start = std::chrono::steady_clock::now();
         std::vector<State> y(N + 1);
-        runge5(fpend, y0, h, y);
+        // Pass a lambda rather than fpend itself: a function reference binds as a
+        // pointer, so clang cannot inline the six calls per step.  Worth ~3% here,
+        // though it makes the two mdspan variants slower -- measure, do not assume.
+        runge5([](const State& state) { return fpend(state); }, y0, h, y);
         const auto finish = std::chrono::steady_clock::now();
 
         // Keep every element observable without including the traversal in the timing.
