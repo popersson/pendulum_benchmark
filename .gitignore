@@ -1,0 +1,20 @@
+# build output
+build/
+*.o
+*.mod
+*.smod
+a.out
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# julia
+Manifest.toml
+
+# editors / os
+*~
+.DS_Store
+.vscode/
+.idea/

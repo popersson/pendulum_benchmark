@@ -1,0 +1,28 @@
+name: build and validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  compiled:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran clang libc++-dev libc++abi-dev cmake
+          python3 -m pip install --upgrade pip
+          python3 -m pip install numpy numba
+
+      - name: Build
+        run: make
+
+      - name: Validate that every implementation agrees
+        run: make validate
+
+      - name: Benchmark the fast implementations
+        run: python3 scripts/bench.py --quick --last 3
