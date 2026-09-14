@@ -50,11 +50,11 @@ contains
   ! Fifth order Runge-Kutta: integrate f from y0 in steps of h, one column of y
   ! per step.  h multiplies the stage arguments rather than the stages
   ! themselves, which lets the compiler hoist the products out of the loop.
-  pure subroutine runge5(f, y0, h, nsteps, y)
+  pure function runge5(f, y0, h, nsteps) result(y)
     procedure(rhs) :: f
     real(dp), intent(in) :: y0(neq), h
     integer, intent(in) :: nsteps
-    real(dp), intent(out) :: y(neq,nsteps+1)
+    real(dp) :: y(neq,nsteps+1)
 
     integer :: n
 
@@ -67,11 +67,11 @@ contains
          associate(k4 => f(yn + h*9*k1/4 - h*5*k2 + h*15*k3/4))
          associate(k5 => f(yn - h*63*k1/100 + h*9*k2/5 - h*13*k3/20 + h*2*k4/25))
          associate(k6 => f(yn - h*6*k1/25 + h*4*k2/5 + h*2*k3/15 + h*8*k4/75))
-         y(:,n+1) = yn + h*(17*k1 + 100*k3 + 2*k4 - 50*k5 + 75*k6) / 144
+           y(:,n+1) = yn + h*(17*k1 + 100*k3 + 2*k4 - 50*k5 + 75*k6) / 144
          end associate;  end associate;  end associate;  end associate;  end associate; end associate
        end associate
     end do
-  end subroutine runge5
+  end function runge5
 
 end module pendulum_functional
 
@@ -86,18 +86,16 @@ program pendulum
   real(dp), parameter :: T = 10000
   integer, parameter :: nsteps = nint(T/h)
 
-  real(dp) :: y(neq,nsteps+1)
   real(dp), volatile :: sink       ! keeps the solution observable to the optimizer
   integer(int64) :: start, finish, rate
   integer :: iter
 
   do iter = 1, 10
      call system_clock(start, rate)
-     call runge5(fpend, y0, h, nsteps, y)
-     call system_clock(finish)
-
-     sink = sum(y)   ! outside the timing, so the traversal is not measured
-
+     associate(y => runge5(fpend, y0, h, nsteps))
+       call system_clock(finish)
+       sink = sum(y)   ! outside the timing, so the traversal is not measured
+     end associate
      print '("Time ",f9.6," seconds.")', real(finish - start, dp) / rate
   end do
 end program pendulum
