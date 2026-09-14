@@ -81,12 +81,11 @@ program pendulum
   use pendulum_functional, only: dp, neq, fpend, runge5
   implicit none (type, external)
 
+  real(dp), volatile :: sink       ! keeps the solution observable to the optimizer
   real(dp), parameter :: y0(neq) = [real(dp) :: 2, 2, 0, -1]
   real(dp), parameter :: h = 0.2_dp
   real(dp), parameter :: T = 10000
-  integer, parameter :: nsteps = nint(T/h)
-
-  real(dp), volatile :: sink       ! keeps the solution observable to the optimizer
+  integer , parameter :: nsteps = nint(T/h)
   integer(int64) :: start, finish, rate
   integer :: iter
 
