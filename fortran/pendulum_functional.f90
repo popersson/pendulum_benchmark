@@ -26,20 +26,24 @@ contains
   pure function fpend(y) result(f)
     real(dp), intent(in) :: y(neq)
     real(dp) f(neq)
-    real(dp) :: s1, c1, s2, c2, sdth, cdth, s12, denom
 
     associate (th1 => y(1), th2 => y(2), om1 => y(3), om2 => y(4))
-      s1 = sin(th1);  c1 = cos(th1)
-      s2 = sin(th2);  c2 = cos(th2)
-      sdth = s1*c2 - c1*s2        ! sin(th1 - th2)
-      cdth = c1*c2 + s1*s2        ! cos(th1 - th2)
-      s12 = sdth*c2 - cdth*s2     ! sin(th1 - 2*th2)
-      denom = 2 + 2*sdth**2       ! 3 - cos(2*th1 - 2*th2)
-
-      f = [om1, &
-           om2, &
-           (-3*s1 - s12 - 2*sdth*(om2**2 + om1**2*cdth)) / denom, &
-           2*sdth*(2*om1**2 + 2*c1 + om2**2*cdth) / denom]
+      associate(s1 => sin(th1),  c1 => cos(th1), s2 => sin(th2),  c2 => cos(th2))
+        associate( &
+          sdth => s1*c2 - c1*s2, &      ! sin(th1 - th2)
+          cdth => c1*c2 + s1*s2  &      ! cos(th1 - th2)
+        )
+          associate( &
+            s12 => sdth*c2 - cdth*s2, & ! sin(th1 - 2*th2)
+            denom => 2 + 2*sdth**2    & ! 3 - cos(2*th1 - 2*th2)
+          )
+            f = [om1, &
+                 om2, &
+                 (-3*s1 - s12 - 2*sdth*(om2**2 + om1**2*cdth)) / denom, &
+                 2*sdth*(2*om1**2 + 2*c1 + om2**2*cdth) / denom]
+          end associate
+        end associate
+      end associate
     end associate
   end function fpend
 
