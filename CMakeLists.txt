@@ -89,11 +89,20 @@ endif()
 check_language(Fortran)
 if(CMAKE_Fortran_COMPILER)
     enable_language(Fortran)
+
     add_executable(pendulum_f fortran/pendulum.f90)
     target_compile_options(pendulum_f PRIVATE -O3)
+
     add_executable(pendulum_f_modern fortran/pendulum_modern.f90)
     target_compile_options(pendulum_f_modern PRIVATE -O3)
+
     set_target_properties(pendulum_f_modern PROPERTIES
+                          Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
+
+    add_executable(pendulum_f_functional fortran/pendulum_functional.f90)
+    target_compile_options(pendulum_f_functional PRIVATE -O3)
+
+    set_target_properties(pendulum_f_functional PROPERTIES
                           Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
 else()
     message(STATUS "pendulum: no Fortran compiler, skipping pendulum_f and pendulum_f_modern")
