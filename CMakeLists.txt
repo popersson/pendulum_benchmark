@@ -38,13 +38,9 @@ if(CMAKE_CXX_COMPILER)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     include(CheckCXXSourceCompiles)
 
-    # pendulum.cpp needs only C++20 (std::span + the static_vector header), so it
-    # builds with any current compiler.  The two mdspan variants need <mdspan>,
-    # which as of today means clang with libc++.
-    add_executable(pendulum_cpp cpp/pendulum.cpp)
-    target_compile_options(pendulum_cpp PRIVATE -O3 -fno-math-errno)
-    target_include_directories(pendulum_cpp PRIVATE cpp)
-
+    # Both C++ variants use md.h (mdxarray), which is built on std::mdspan --
+    # as of today that means clang with libc++.  The probe below decides whether
+    # any of them can be built; md.h itself emits a clear #error otherwise.
     set(MDSPAN_PROBE "#include <mdspan>
 #include <cstddef>
 int main() {
@@ -63,22 +59,19 @@ int main() {
     unset(CMAKE_REQUIRED_FLAGS)
 
     if(HAVE_MDSPAN OR HAVE_MDSPAN_LIBCXX)
-        foreach(variant mdspan colref)
-            add_executable(pendulum_cpp_${variant} cpp/pendulum_${variant}.cpp)
-            target_compile_options(pendulum_cpp_${variant} PRIVATE -O3 -fno-math-errno)
-            target_include_directories(pendulum_cpp_${variant} PRIVATE cpp)
+        add_executable(pendulum_cpp cpp/pendulum.cpp)
+        add_executable(pendulum_cpp_mdxarray cpp/pendulum_mdxarray.cpp)
+        foreach(target pendulum_cpp pendulum_cpp_mdxarray)
+            target_compile_options(${target} PRIVATE -O3 -fno-math-errno)
+            target_include_directories(${target} PRIVATE cpp)
             if(HAVE_MDSPAN_LIBCXX)
-                target_compile_options(pendulum_cpp_${variant} PRIVATE -stdlib=libc++)
-                target_link_options(pendulum_cpp_${variant} PRIVATE -stdlib=libc++)
+                target_compile_options(${target} PRIVATE -stdlib=libc++)
+                target_link_options(${target} PRIVATE -stdlib=libc++)
             endif()
         endforeach()
-        if(HAVE_MDSPAN_LIBCXX)
-            target_compile_options(pendulum_cpp PRIVATE -stdlib=libc++)
-            target_link_options(pendulum_cpp PRIVATE -stdlib=libc++)
-        endif()
     else()
-        message(STATUS "pendulum: no <mdspan> with this C++ compiler, skipping "
-                       "pendulum_cpp_mdspan and pendulum_cpp_colref "
+        message(STATUS "pendulum: no <mdspan> with this C++ compiler, skipping both "
+                       "C++ variants -- md.h needs it "
                        "(try -DCMAKE_CXX_COMPILER=clang++ with libc++ installed)")
     endif()
 else()

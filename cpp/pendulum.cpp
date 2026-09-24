@@ -6,16 +6,18 @@
 #include <span>
 #include <vector>
 
-#include "static_vector.hpp"
+#include "md.h"
 
 constexpr std::size_t dimension = 4;
 
-using State = static_vector<double, dimension>;
+using State = md::sarray<double, dimension>;
 
 // A trajectory is a sequence of states, so there is no second container type and
 // nothing to slice: std::vector<State> is the same 4 x (N+1) block of contiguous
 // doubles a column-major matrix would be, and y[n] *is* the n-th column.
 // (This is how one writes it in Julia too: Vector{SVector{4,Float64}}.)
+// md::sarray is exactly its four doubles, so the vector is that block and nothing
+// else -- no shape stored per element, no indirection.
 
 void runge5(const auto& f, const State& y0, double h, std::span<State> y)
 {
@@ -75,8 +77,7 @@ int main()
         const auto start = std::chrono::steady_clock::now();
         std::vector<State> y(N + 1);
         // Pass a lambda rather than fpend itself: a function reference binds as a
-        // pointer, so clang cannot inline the six calls per step.  Worth ~3% here,
-        // though it makes the two mdspan variants slower -- measure, do not assume.
+        // pointer, so clang cannot inline the six calls per step.  Worth ~3%.
         runge5([](const State& state) { return fpend(state); }, y0, h, y);
         const auto finish = std::chrono::steady_clock::now();
 

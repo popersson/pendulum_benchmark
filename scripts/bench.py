@@ -72,8 +72,7 @@ def implementations(build):
     items = [
         ("pendulum_c", "C", [build / "pendulum_c"], None, ""),
         ("pendulum_cpp", "C++", [build / "pendulum_cpp"], None, "std::vector<State>"),
-        ("pendulum_cpp_mdspan", "C++", [build / "pendulum_cpp_mdspan"], None, "mdspan"),
-        ("pendulum_cpp_colref", "C++", [build / "pendulum_cpp_colref"], None, "mdspan + column refs"),
+        ("pendulum_cpp_mdxarray", "C++", [build / "pendulum_cpp_mdxarray"], None, "md::array"),
         ("pendulum_f", "Fortran", [build / "pendulum_f"], None, ""),
         ("pendulum_f_modern", "Fortran", [build / "pendulum_f_modern"], None, ""),
     ]

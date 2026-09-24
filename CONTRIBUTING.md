@@ -42,7 +42,7 @@ comment.
 
 Sources live in `c/`, `cpp/`, `fortran/`, `julia/`, `matlab/`, `python/`. The
 straightforward version of a language is `pendulum.<ext>`; every variant adds
-one descriptive word, as in `pendulum_views.jl` or `pendulum_colref.cpp`.
+one descriptive word, as in `pendulum_views.jl` or `pendulum_mdxarray.cpp`.
 
 ## Before you open a pull request
 

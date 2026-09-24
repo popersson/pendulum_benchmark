@@ -1,38 +1,26 @@
 #include <chrono>
 #include <cmath>
-#include <cstddef>
 #include <iomanip>
 #include <iostream>
-#include <mdspan>
-#include <numeric>
-#include <vector>
 
-#include "static_vector.hpp"
-#include "static_vector_ref.hpp"
+#include "md.h"
 
-constexpr std::size_t dimension = 4;
+constexpr md::index_t dimension = 4;
 
-using State = static_vector<double, dimension>;
-using StateRef = static_vector_ref<double, dimension>;
-using Matrix = std::mdspan<double,
-                           std::extents<std::size_t, dimension, std::dynamic_extent>,
-                           std::layout_left>;
+using State = md::sarray<double, dimension>;
+using Matrix = md::dview<2>;   // md::darray<2> binds to this: array derives from view
 
-// layout_left keeps each column contiguous, so a column is just a reference to
-// the dimension elements starting at its first one.  Assign to it to write the
-// column, convert it to a State to read the column.
-StateRef column(Matrix y, std::size_t n)
-{
-    return StateRef(&y[0, n]);
-}
-
+// layout_left is Fortran order: the FIRST index varies fastest, so one state --
+// a column -- is four consecutive doubles.  Fixing the last index therefore
+// leaves a gap-free block, and that is exactly what page(n) hands back, for
+// free.  Assigning to a slice copies elements; only a named view would rebind.
 void runge5(const auto& f, const State& y0, double h, Matrix y)
 {
-    const std::size_t N = y.extent(1) - 1;
+    const md::index_t N = y.n(1) - 1;
 
-    column(y, 0) = y0;
-    for (std::size_t n = 0; n < N; ++n) {
-        const State yn = column(y, n);
+    y.page(0) = y0;
+    for (md::index_t n = 0; n < N; ++n) {
+        const State yn(y.page(n));
         const State k1 = f(yn);
         const State k2 = f(yn + h * k1 / 5.0);
         const State k3 = f(yn + h * 2.0 * k2 / 5.0);
@@ -42,8 +30,8 @@ void runge5(const auto& f, const State& y0, double h, Matrix y)
                            - h * 13.0 * k3 / 20.0 + h * 2.0 * k4 / 25.0);
         const State k6 = f(yn - h * 6.0 * k1 / 25.0 + h * 4.0 * k2 / 5.0
                            + h * 2.0 * k3 / 15.0 + h * 8.0 * k4 / 75.0);
-        column(y, n + 1) = yn + h * (17.0 * k1 + 100.0 * k3 + 2.0 * k4
-                                     - 50.0 * k5 + 75.0 * k6) / 144.0;
+        y.page(n + 1) = yn + h * (17.0 * k1 + 100.0 * k3 + 2.0 * k4
+                                  - 50.0 * k5 + 75.0 * k6) / 144.0;
     }
 }
 
@@ -78,17 +66,18 @@ int main()
     const State y0 = {2.0, 2.0, 0.0, -1.0};
     const double h = 0.2;
     const double T = 10000.0;
-    const auto N = static_cast<std::size_t>(std::lround(T / h));
+    const auto N = static_cast<md::index_t>(std::lround(T / h));
 
     for (int iter = 0; iter < 10; ++iter) {
         const auto start = std::chrono::steady_clock::now();
-        std::vector<double> storage(dimension * (N + 1));
-        const Matrix y(storage.data(), N + 1);
-        runge5(fpend, y0, h, y);
+        md::darray<2> y(dimension, N + 1);
+        // Pass a lambda rather than fpend itself: a function reference binds as a
+        // pointer, so clang cannot inline the six calls per step.  Worth ~2%.
+        runge5([](const State& state) { return fpend(state); }, y0, h, y);
         const auto finish = std::chrono::steady_clock::now();
 
         // Keep every element observable without including the traversal in the timing.
-        benchmark_sink = std::accumulate(storage.begin(), storage.end(), 0.0);
+        benchmark_sink = md::sum(y);
 
         const std::chrono::duration<double> elapsed = finish - start;
         std::cout << "Time " << std::fixed << std::setprecision(6)

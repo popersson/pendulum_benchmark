@@ -81,8 +81,7 @@ def cases(build):
     if cxx:
         cpp_files = [("pendulum.cpp", "pendulum.cpp", True)]
         if has_mdspan:
-            cpp_files += [("pendulum_mdspan.cpp",) * 2 + (True,),
-                          ("pendulum_colref.cpp",) * 2 + (True,)]
+            cpp_files += [("pendulum_mdxarray.cpp",) * 2 + (True,)]
         for name, filename, _ in cpp_files:
             flags = ["-O3", "-fno-math-errno", "-std=c++23"]
             if libcxx:
@@ -90,7 +89,7 @@ def cases(build):
             out.append(dict(
                 name=name, src=ROOT / "cpp" / filename,
                 rules=[("const double T = 10000.0;", "const double T = 10.0;"), CPP_CHECK],
-                copy=[ROOT / "cpp/static_vector.hpp", ROOT / "cpp/static_vector_ref.hpp"],
+                copy=[ROOT / "cpp/md.h"],
                 build=lambda d, f, flags=flags, cxx=cxx: [cxx, *flags, "-I", str(d),
                                                           "-o", str(d / "a.out"), str(f)],
                 run=lambda d: [str(d / "a.out")]))

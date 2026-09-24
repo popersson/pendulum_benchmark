@@ -48,11 +48,9 @@ worst at. The system is also chaotic, which turns out to be useful — see
 
 ```
 c/pendulum.c                 explicit loops and an indexing macro
-cpp/pendulum.cpp             std::vector<State>, needs only C++20
-cpp/pendulum_mdspan.cpp      std::mdspan, columns copied in and out
-cpp/pendulum_colref.cpp      std::mdspan, columns as assignable references
-cpp/static_vector.hpp        the owning fixed-size vector C++ does not ship
-cpp/static_vector_ref.hpp    its non-owning companion
+cpp/pendulum.cpp             std::vector<md::sarray>, an array of states
+cpp/pendulum_mdxarray.cpp    md::array, columns read and written through page()
+cpp/md.h                     mdxarray: the owning and static array types C++ lacks
 fortran/pendulum.f90         external subroutines, the classic style
 fortran/pendulum_modern.f90  module, associate, abstract interface, pure
 julia/pendulum.jl            the straightforward version; allocates per call
@@ -90,16 +88,17 @@ does something useful on a bare machine with only a C compiler.
 them in the current interpreter and then in `./.venv` and `~/.venv`, and skip those two
 files if neither has them. Only NumPy and Matplotlib are needed for the rest.
 
-**`<mdspan>` is the one fussy dependency.** As of today it needs clang with libc++, so
-the Makefile prefers `clang++` when it is installed; without it, `cpp/pendulum.cpp` still
-builds with any C++20 compiler and the two mdspan variants are skipped with a message.
-Force a compiler with `make CXX=g++`.
+**`<mdspan>` is the one fussy dependency.** Both C++ variants use `cpp/md.h`
+([mdxarray](https://github.com/popersson/mdxarray)), which is built on `std::mdspan`, and as
+of today that needs clang with libc++. The Makefile therefore prefers `clang++` when it is
+installed; without it both are skipped with a message and everything else still builds.
+Force a compiler with `make CXX=g++` to see that happen.
 
 The sources are ordinary single-file programs, so you never have to use the build system:
 
 ```sh
 gcc -O3 -o pendulum c/pendulum.c -lm
-clang++ -O3 -fno-math-errno -std=c++23 -stdlib=libc++ -Icpp -o pendulum cpp/pendulum_mdspan.cpp
+clang++ -O3 -fno-math-errno -std=c++23 -stdlib=libc++ -Icpp -o pendulum cpp/pendulum_mdxarray.cpp
 gfortran -O3 -o pendulum fortran/pendulum_modern.f90
 julia julia/pendulum_inline.jl
 python3 python/pendulum.py
@@ -167,13 +166,23 @@ into an out-argument instead of returning an array — `call f(yn + h*k1/5, k2)`
 Fortran within 3% of the best C++ and 2% ahead of C, with no library, no templates and no
 hand-written vector class.
 
-**6. Modern C++ recovers both beauty and speed, but has to build its own vocabulary
-first.** The language still has no owning multidimensional array (`std::mdarray` is C++26)
-and no arithmetic on `std::array`. `cpp/static_vector.hpp` and `cpp/static_vector_ref.hpp`
-are the missing pieces, about 200 lines, after which the integrator reads like the Julia
-version and runs slightly *faster* than C — second only to Julia. Eigen would do the same.
-Every other language here has this out of the box; it is C++'s one real handicap, and it
-is worth being blunt about.
+**6. Modern C++ recovers both beauty and speed, but has to bring its own vocabulary.** The
+language still has no owning multidimensional array (`std::mdarray` is C++26) and no
+arithmetic on `std::array`, so both C++ variants here lean on
+[mdxarray](https://github.com/popersson/mdxarray) (`cpp/md.h`): `md::sarray` for the state,
+`md::array` for the trajectory. With that vocabulary in place the integrator reads like the
+Julia version and runs *faster* than C — second only to Julia. Eigen or a couple of hundred
+lines of your own would do the same job. Every other language here has this out of the box;
+it is C++'s one real handicap, and it is worth being blunt about.
+
+What that vocabulary has to provide is worth spelling out, because the first port of these
+files to mdxarray needed a workaround for each item and the library has since grown all of
+them: element-wise construction, so `return {θ1dot, θ2dot, ω1dot, ω2dot};` compiles; a
+tuple protocol, so `const auto [θ1, θ2, ω1, ω2] = y;` does; a converting constructor from a
+view, so a column can start an expression; and assignment to a *slice* writing through
+(`y.page(n + 1) = ...`) while assignment to a named view rebinds, as `std::mdspan` does.
+Miss any one of them and the integrator picks up a helper function or a `md::assign` call
+at exactly the place where the mathematics should be.
 
 **7. The headline result nobody expects: this benchmark is ~three fifths a `libm`
 benchmark.** With the arithmetic equalized across languages, Julia, C, C++ and Fortran land
@@ -184,43 +193,46 @@ and it is the most interesting thing to say about it.
 
 ## Timings
 
-Median of 8 interleaved rounds, each round taking the best of 10 in-run iterations, pinned
-to one core with the CPU governor set to `performance` (core 0 holds 4.34–4.45 GHz under
-load, against a 4.5 GHz max turbo, on AC power). Interleaving and a fixed clock matter:
-under `powersave` the absolute times drift ~30% between rounds and the ordering of the
-leading group shuffles. Distributions here are tight — ±0.3 ms — so the ranking is real,
-and `pendulum_inline.jl`'s *slowest* round still beats every other implementation's
-median, and every distribution below is tight to ±0.03 ms — a quiet desktop with a fixed
-clock is a far better measuring instrument than a laptop.
+Minimum over 8 interleaved rounds, each round taking the best of 10 in-run iterations,
+every run pinned with `taskset -c 0`.
+
+The minimum rather than the median, because the implementations that allocate the
+trajectory on the heap turn out to be **bimodal**: the same binary, run repeatedly, lands
+either near 6.93 ms or near 7.74 ms with nothing in between — 16 runs of one binary split
+8/8. It is not the CPU governor, not ASLR (it survives `setarch -R`), and not SMT
+contention (deliberately loading the sibling hyperthread costs 33%, a third and much
+larger mode). It is a property of the memory the process happens to be given;
+`fortran/pendulum_modern.f90`, whose trajectory is a static array, is immune and measures
+to ±0.03 ms. Taking the minimum over many runs selects the good layout consistently, which
+is the only way the 1–3% differences at the top of this table mean anything.
 
 | Implementation | ms | vs fastest | Notes |
 |---|---|---|---|
-| **`julia/pendulum_inline.jl`** | **6.79** | **1.00×** | **beautiful *and* fastest — SVector + `@view` + `@inline`** |
-| `cpp/pendulum.cpp` | 6.95 | 1.02× | `std::vector<State>`, no mdspan needed; passes a lambda so clang inlines |
-| `cpp/pendulum_colref.cpp` | 7.19 | 1.06× | mdspan + `static_vector_ref` column references |
-| `cpp/pendulum_mdspan.cpp` | 7.19 | 1.06× | mdspan + `static_vector` |
-| `fortran/pendulum_modern.f90` | 7.39 | 1.09× | modern Fortran, `pure subroutine` right-hand side |
-| `fortran/pendulum.f90` | 7.51 | 1.11× | the classic style |
-| `julia/pendulum_cstyle.jl` | 7.52 | 1.11× | Julia written as C |
-| `c/pendulum.c` | 7.57 | 1.12× | |
-| `julia/pendulum_views.jl` | 7.68 | 1.13× | fast-but-ugly Julia: preallocated buffers, `@.` everywhere |
-| `julia/pendulum_svector.jl` | 9.24 | 1.36× | `pendulum_inline.jl` without `@inline` |
-| `python/pendulum_numba.py` | 12.3 | 1.81× | `pendulum.py` + `@njit`, a six-line diff |
-| `python/pendulum_jax.py` | 25.8 | 3.80× | jit + `fori_loop`, held to one thread like the others |
-| `julia/pendulum.jl` | 36.7 | 5.4× | the beautiful Julia baseline: allocates per call |
-| `julia/pendulum_tuple.jl` | 64.5 | 9.5× | tuples plus broadcast; 24× faster on Julia 1.13 than on 1.12 |
-| `matlab/pendulum.m` | 112 | 16.6× | the beautiful MATLAB baseline; this is an old MATLAB (R2018b), but R2026a measured 13.8× elsewhere, so the row is about right |
-| `python/pendulum_tuple.py` | 575 | 85× | plain Python 4-tuples, no NumPy in the hot loop |
-| `python/pendulum.py` | 1266 | 186× | the beautiful Python baseline |
+| **`julia/pendulum_inline.jl`** | **6.69** | **1.00×** | **beautiful *and* fastest — SVector + `@view` + `@inline`** |
+| `cpp/pendulum.cpp` | 6.84 | 1.02× | `std::vector<md::sarray>`; passes a lambda so clang inlines |
+| `cpp/pendulum_mdxarray.cpp` | 6.95 | 1.04× | `md::array`, columns via `page()` |
+| `fortran/pendulum_modern.f90` | 7.23 | 1.08× | modern Fortran, `pure subroutine` right-hand side |
+| `fortran/pendulum.f90` | 7.38 | 1.10× | the classic style |
+| `c/pendulum.c` | 7.44 | 1.11× | |
+| `julia/pendulum_cstyle.jl` | 7.45 | 1.11× | Julia written as C |
+| `julia/pendulum_views.jl` | 7.56 | 1.13× | fast-but-ugly Julia: preallocated buffers, `@.` everywhere |
+| `julia/pendulum_svector.jl` | 9.11 | 1.36× | `pendulum_inline.jl` without `@inline` |
+| `python/pendulum_numba.py` | 12.7 | 1.90× | `pendulum.py` + `@njit`, a six-line diff |
+| `python/pendulum_jax.py` | 24.3 | 3.63× | jit + `fori_loop`, held to one thread like the others |
+| `julia/pendulum.jl` | 37.0 | 5.5× | the beautiful Julia baseline: allocates per call |
+| `julia/pendulum_tuple.jl` | 65.2 | 9.7× | tuples plus broadcast; 24× faster on Julia 1.13 than on 1.12 |
+| `matlab/pendulum.m` | 108 | 16.1× | the beautiful MATLAB baseline; this is an old MATLAB (R2018b), but R2026a measured 13.8× elsewhere, so the row is about right |
+| `python/pendulum_tuple.py` | 580 | 86.8× | plain Python 4-tuples, no NumPy in the hot loop |
+| `python/pendulum.py` | 1192 | 178× | the beautiful Python baseline |
 | JAX without `jit` | ~200 000 | ~30 000× | ~4 ms *per step*; ~150× slower than plain NumPy |
 
 Three orderings are worth pausing on. **Julia is first, ahead of C, C++ and Fortran** — by
-2% over the best C++, which is the margin after handing clang the one inlining hint it does
-not take by default (without it, 6%). **The beautiful Julia beats the ugly Julia by 13%**
-(`pendulum_inline.jl` 6.79 ms against `pendulum_views.jl` 7.68 ms), which reverses the usual
-assumption that the buffer-juggling version must be faster. And **C is last of the compiled
-implementations**, behind both Fortrans and all three C++ variants — and behind
-`pendulum_cstyle.jl`, which is Julia written in C's own style.
+2% over the best C++, and that is the margin after handing clang the one inlining hint it
+does not take by default. **The beautiful Julia beats the ugly Julia by 13%**
+(`pendulum_inline.jl` 6.69 ms against `pendulum_views.jl` 7.56 ms), which reverses the usual
+assumption that the buffer-juggling version must be faster. And **C is at the back of the
+compiled group**, behind both Fortrans and both C++ variants, and level with
+`pendulum_cstyle.jl` — Julia written in C's own style.
 
 ## Where the time actually goes
 
@@ -282,18 +294,22 @@ function reference through the template parameter), and Fortran six indirect one
 
 | | as written | inlined | |
 |---|---|---|---|
-| `cpp/pendulum.cpp` | 7.19 | **6.95** | lambda instead of a function reference; **kept** |
-| `cpp/pendulum_mdspan.cpp` | 7.19 | 7.32 | same change, 2% *slower*; reverted |
-| `cpp/pendulum_colref.cpp` | 7.19 | 7.47 | same change, 4% *slower*; reverted |
-| `c/pendulum.c` | 7.57 | 7.88 | `always_inline`, 4% *slower*; not used |
-| `fortran/pendulum_modern.f90` | 7.41 | 7.40 | `-flto`, no change; not used |
+| `cpp/pendulum.cpp` | 7.10 | **6.87** | lambda instead of a function reference; **kept** |
+| `cpp/pendulum_mdxarray.cpp` | 7.10 | **6.98** | same change; **kept** |
+| `c/pendulum.c` | 7.40 | 7.70 | `always_inline`, 4% *slower*; not used |
+| `fortran/pendulum_modern.f90` | 7.21 | 7.22 | `-flto`, no change; not used |
 
-gcc, incidentally, *refuses* to inline `fpend` even when it is `static` and the inline budget
-is raised to 3000 instructions, and the measurement says it is right to. Three ways of
-getting clang to inline it — a lambda at the call site, defining `fpend` as a `constexpr`
-lambda, or a function pointer as a template parameter — all land within noise of each other
-(6.97–7.00 ms), so `cpp/pendulum.cpp` uses the one that leaves `fpend` and `runge5`
-untouched. Even at its best, C++ is 2% behind Julia.
+Both C++ variants want it and neither C nor Fortran does. It used to matter much more for
+`pendulum_mdxarray.cpp` — 11% rather than 2% — because the column write went through a copy
+loop whose trip count was a runtime value, and inlining `fpend` was what let the compiler
+see that the loop was four iterations long. mdxarray now takes that count from whichever
+operand has static extents, which removes the cliff: the un-inlined version went from 7.78
+to 7.10 ms on that change alone. gcc, incidentally, *refuses* to inline `fpend` even when it
+is `static` and the inline budget is raised to 3000 instructions, and the measurement says
+it is right to. Three ways of getting clang to inline it — a lambda at the call site,
+defining `fpend` as a `constexpr` lambda, or a function pointer as a template parameter —
+all measure the same, so the files use the one that leaves `fpend` and `runge5` untouched.
+Even at its best, C++ is 2% behind Julia.
 
 The reason `@inline` is worth 1.4× in Julia and at most 3% elsewhere is that Julia was paying a
 penalty the others never pay: un-inlined, `fpend` returns its `SVector` by value through
@@ -383,7 +399,7 @@ Validating every implementation at T = 10 (50 steps).
   pendulum.c               -27.1127168681825
   pendulum.cpp             -27.1127168681825
   ...
-  OK: all 16 implementations agree.
+  OK: all 15 implementations agree.
 ```
 
 `scripts/validate.py` copies each file to a temporary directory, rewrites `T = 10000` to
@@ -391,7 +407,7 @@ Validating every implementation at T = 10 (50 steps).
 Fifty steps is long enough that a wrong Runge–Kutta coefficient or a mistyped step size
 shows up in the first digit, and short enough that chaos has not yet amplified last-bit
 differences between compilers — at the full `T = 10000` the checksums cannot be compared
-at all. The largest deviation across all sixteen is 2.5e-15, which is summation order:
+at all. The largest deviation across all fifteen is 2.5e-15, which is summation order:
 Julia's and MATLAB's `sum` are pairwise where C's loop is sequential.
 
 Two stage typos turned up in the Julia files during exactly this cross-check —
@@ -438,10 +454,10 @@ deserves credit for a good deal of what is here now:
 - **Performance work.** The `sincos`-plus-identities rewrite of the right-hand side
   (~1.5× everywhere), equalizing where `h` multiplies across all implementations, and
   tracking down why `@inline` was worth 1.4× in Julia.
-- **New variants.** `cpp/static_vector.hpp` and its companion, the `std::vector<State>` and
-  column-reference C++ versions, the modern Fortran rewrite, `julia/pendulum_inline.jl`, and
-  `python/pendulum_tuple.py`. The numba and JAX files were AI-written from the start and were
-  rewritten here.
+- **New variants.** The `std::vector<State>` and column-reference C++ versions (originally
+  on a pair of hand-written headers, since ported to mdxarray), the modern Fortran rewrite,
+  `julia/pendulum_inline.jl`, and `python/pendulum_tuple.py`. The numba and JAX files were
+  AI-written from the start and were rewritten here.
 - **Debugging.** Two wrong Runge–Kutta stage coefficients that had been sitting in the Julia
   files, a single-precision `0.2` in the Fortran, and an accidentally quadratic JAX loop that
   was costing 84×.
